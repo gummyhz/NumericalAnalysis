@@ -3,19 +3,17 @@
 #include <cmath>
 #include <chrono>
 #include <omp.h>
-#include "../read_txt_to_vec.cpp"
 
 using namespace std;
 
-// g++ gs.cpp -o gs
-
-const int n = 2;
+// Compile with:    g++ gs.cpp -o gs -fopenmp
+// Run with:        ./gs
 
 // Algorithm to match the Gauss-Seidel Lab
-void gauss_seidel(int n, const double * A, const double * b, double * x, int max_iter, double & error, double & residual) {
+void gauss_seidel(const int n, const double * A, const double * b, double * x, int max_iter, double & error, double & residual) {
     double x_last[n], b_pred[n];
     for (int i = 0; i < n; ++i) {
-        b_pred[i] = 1;
+        b_pred[i] = 0;
         x[i] = 1;
         x_last[i] = 0;
     }
@@ -25,16 +23,12 @@ void gauss_seidel(int n, const double * A, const double * b, double * x, int max
         for (int i=0; i < n; i++) { x_last[i] = x[i]; }
 
         for (int i=0; i<n; i++) {
-            // cout << "--- i: " << i << endl;
             double sum_term = 0;
             for (int j=0; j < n; j++) {
-                // cout << "i: " << i << " j: " << j << endl;
                 if (j < i) {
                     sum_term += *(A + i*n + j) * x[j];
-                    // cout << "   sum_term += " << *(A + i*n + j) * x[j] << endl;
                 } else if (j > i) {
                     sum_term += *(A + i*n + j) * x_last[j];
-                    // cout << "   sum_term += " << *(A + i*n + j) * x_last[j] << endl;
                 }
             }
             sum_term = b[i] - sum_term;
@@ -50,64 +44,58 @@ void gauss_seidel(int n, const double * A, const double * b, double * x, int max
 
     residual = 0;
     for (int i=0; i < n; i++) {
-        b_pred[i] = 0;
         for (int j=0; j < n; j++) {
             b_pred[i] += (*(A + i*n + j)) * x[j];
         }
-        // cout << "A*x[" << i << "]: " << b_pred[i] << " \tb[" << i << "]: " << b[i] << endl;
         residual += std::pow((b[i] - b_pred[i]), 2);
     }
     residual = sqrt(residual);
 }
 
 // Multithreaded Algorithm to match the Gauss-Seidel Lab
-void gauss_seidel_omp(int n, const double * A, const double * b, double * x, int max_iter, double & error, double & residual) {
+void gauss_seidel_omp(const int n, const double * A, const double * b, double * x, int max_iter, double & error, double & residual) {
     double x_last[n], b_pred[n];
     for (int i = 0; i < n; ++i) {
-        b_pred[i] = 1;
+        b_pred[i] = 0;
         x[i] = 1;
         x_last[i] = 0;
     }
 
     for (int k=0; k < max_iter; k++) {
         // Copy x into x_last
-        #pragma omp parallel for
+        #pragma omp parallel for 
         for (int i=0; i < n; i++) { x_last[i] = x[i]; }
-
-        #pragma omp parallel for
+ 
+        // #pragma omp parallel for
+        //  note race conditions for x[j] due to potential for concurrent writing and reading
         for (int i=0; i<n; i++) {
             double sum_term = 0;
-            // cout << "--- i: " << i << endl;
             for (int j=0; j < n; j++) {
-                // cout << "i: " << i << " j: " << j << endl;
+
                 if (j < i) {
-                    sum_term += *(A + i*n + j) * x[j];
-                    // cout << "   sum_term += " << *(A + i*n + j) * x[j] << endl;
+                    sum_term += *(A + i*n + j) * x[j];  // read x[j]
                 } else if (j > i) {
                     sum_term += *(A + i*n + j) * x_last[j];
-                    // cout << "   sum_term += " << *(A + i*n + j) * x_last[j] << endl;
                 }
             }
             sum_term = b[i] - sum_term;
-            x[i] = (1.0/(*(A + i*n + i)))*sum_term;
+            x[i] = (1.0/(*(A + i*n + i)))*sum_term; // write x[j]
         }
     }
     // Find error between current and previous iteration
     error = 0;
+    #pragma omp parallel for 
     for (int i=0; i < n; i++) {
         error += std::pow((x[i] - x_last[i]), 2);
     }
     error = sqrt(error);
 
     residual = 0;
+    #pragma omp parallel for 
     for (int i=0; i < n; i++) {
-        b_pred[i] = 0;
         for (int j=0; j < n; j++) {
             b_pred[i] += (*(A + i*n + j)) * x[j];
-            // cout << A[i][j] * x[j] << endl;
-
         }
-        // cout << "A*x[" << i << "]: " << b_pred[i] << " \tb[" << i << "]: " << b[i] << endl;
         residual += std::pow((b[i] - b_pred[i]), 2);
     }
     residual = sqrt(residual);
@@ -116,11 +104,14 @@ void gauss_seidel_omp(int n, const double * A, const double * b, double * x, int
 
 int main() {
     // Initialize varaibles
+    const int n = 4;
     const double A[n][n] = {
-        {4, 3}, 
-        {-1, 2}
+        {4, 3, 2, 1}, 
+        {-1, 2, 0, .5},
+        {0, 3, 6, 2},
+        {1, 1.3, 7, 10}
     };
-    const double b[n] = {59.2, 47};
+    const double b[n] = {59.2, 47, 12, 22};
     const int max_iter = 5;
 
     double b_pred[n], x[n];
@@ -142,7 +133,22 @@ int main() {
     } 
     cout << "]" << endl;
     cout << "Error between the last two iterations (2 norm): " << error << endl;
-    cout << "Residual (2 norm): " << residual << endl;
+    cout << "Residual (2 norm): " << residual << endl << endl;
+
+    cout << "Now let\'s try with multiple treads~" << endl;
+    printf("This region is using %d threads\n", omp_get_num_threads()); 
+    printf("Inside a parallel region, we can run at most %d threads\n", omp_get_max_threads()); 
+    printf("~~~ Enter parallel region ~~~\n");
+    #pragma omp parallel
+    {
+        // I'll use printf because its output will not be mixed with concurrent printf calls
+        // When using cout with "<<", these calls may get mixed between threads
+        if (omp_get_thread_num() == 0) {
+            printf("This region is using %d threads\n", omp_get_num_threads()); 
+        }
+        printf("Hi, I\'m thread number %d\n", omp_get_thread_num());
+    }
+    printf("~~~ Exit parallel region ~~~\n\n");
 
     // cout << endl << "######## BEGIN GAUSS SEIDEL (OMP) ########" << endl;
     auto gs_omp_start = chrono::high_resolution_clock::now();
@@ -152,7 +158,7 @@ int main() {
     // cout << "######## END GAUSS SEIDEL (OMP) ########" << endl;
 
     // Outputs
-    cout << endl << "Gauss-Seidel with OMP took " << gs_omp_duration.count() << " microseconds" << endl;
+    cout << "Gauss-Seidel with OMP took " << gs_omp_duration.count() << " microseconds" << endl;
     cout << "x: [ \t";
     for (int i=0; i<n; i++) {
         cout << x[i] << " \t";
