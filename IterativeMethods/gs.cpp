@@ -67,7 +67,6 @@ void gauss_seidel_omp(const int n, const double * A, const double * b, double * 
         for (int i=0; i < n; i++) { x_last[i] = x[i]; }
  
         // #pragma omp parallel for
-        //  note race conditions for x[j] due to potential for concurrent writing and reading
         for (int i=0; i<n; i++) {
             double sum_term = 0;
             for (int j=0; j < n; j++) {
